@@ -12,6 +12,8 @@ sudo apt-get install terraform
 //Accorder les permissions au dossier contenant les images des VM
 sudo chown libvirt-qemu:kvm /var/lib/libvirt/images
 
+mkdir /home/n7/pool
+
 //Créer la pool
 virsh pool-define-as mypool dir - - - - "/home/n7/pool"
 virsh pool-build mypool

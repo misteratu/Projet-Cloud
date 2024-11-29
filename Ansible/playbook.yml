@@ -1,0 +1,123 @@
+---
+- name: Installer KVM, Terraform et configurer les dépôts nécessaires
+  hosts: all
+  become: true  # Exécuter avec sudo
+  tasks:
+    - name: Mettre à jour les paquets
+      apt:
+        update_cache: yes
+
+    - name: Installer les paquets nécessaires
+      apt:
+        name: 
+          - openssh-server
+          - qemu-kvm
+          - libvirt-daemon-system
+          - libvirt-clients
+          - bridge-utils
+          - virt-manager
+          - gnupg
+          - software-properties-common
+        state: present
+
+    - name: Ajouter la clé GPG de HashiCorp si absente
+      ansible.builtin.shell: |
+        wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/hashicorp-archive-keyring.gpg  # Exécuter uniquement si le fichier n'existe pas
+
+    - name: Ajouter le dépôt HashiCorp
+      lineinfile:
+        path: /etc/apt/sources.list.d/hashicorp.list
+        line: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+        state: present
+
+    - name: Mettre à jour la liste des paquets après ajout du dépôt
+      apt:
+        update_cache: yes
+
+    - name: Installer Terraform
+      apt:
+        name: terraform
+        state: present
+
+    - name: Ajouter des paramètres à la fin de qemu.conf
+      blockinfile:
+        path: /etc/libvirt/qemu.conf
+        block: |
+          user = "libvirt-qemu"
+          group = "kvm"
+          security_driver = "none"
+        state: present
+
+    - name: Redémarrer le service libvirtd
+      service:
+        name: libvirtd
+        state: restarted
+
+    - name: Accorder les permissions au dossier contenant les images des VM
+      file:
+        path: /var/lib/libvirt/images
+        owner: libvirt-qemu
+        group: kvm
+        recurse: false
+
+    - name: Créer le dossier pour la pool
+      file:
+        path: /home/n7/pool
+        state: directory
+        owner: libvirt-qemu
+        group: kvm
+        mode: '0770'
+
+    - name: Définir la pool 'mypool'
+      command: virsh pool-define-as mypool dir - - - - "/home/n7/pool"
+      args:
+        creates: /etc/libvirt/storage/mypool.xml  # Vérifie si la pool existe déjà
+
+    - name: Construire la pool 'mypool'
+      command: virsh pool-build mypool
+      when: "'mypool' not in pools_active.stdout_lines"
+      register: pools_active
+      changed_when: false
+
+    - name: Démarrer la pool 'mypool'
+      command: virsh pool-start mypool
+      when: "'mypool' not in pools_active.stdout_lines"
+      changed_when: false
+
+    - name: Activer l'autostart pour 'mypool'
+      command: virsh pool-autostart mypool
+
+    - name: Accorder les permissions sur /home/n7/pool
+      file:
+        path: /home/n7/pool
+        owner: libvirt-qemu
+        group: kvm
+        mode: '0770'
+        recurse: true
+
+    - name: Télécharger l'image Ubuntu dans la pool
+      get_url:
+        url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+        dest: /var/lib/libvirt/images/ubuntu-24.04.qcow2
+        mode: '0644'
+        owner: libvirt-qemu
+        group: kvm
+
+    - name: Cloner le dépôt Git dans /home/n7
+      git:
+        repo: https://github.com/misteratu/Projet-Cloud.git
+        dest: /home/n7/Projet-Cloud
+        version: main  # Branche principale
+        update: yes  # Met à jour le dépôt si déjà cloné
+
+    - name: Initialiser Terraform
+      command: terraform init
+      args:
+        chdir: /home/n7/Projet-Cloud/terraform  # Définit le répertoire d'exécution
+
+    - name: Appliquer la configuration Terraform
+      command: terraform apply -auto-approve
+      args:
+        chdir: /home/n7/Projet-Cloud/terraform
