@@ -15,5 +15,5 @@ variable "bridge_name" {
 }
 
 variable "image_path" {
-    default = "/var/lib/libvirt/images/ubuntu-24.04.qcow2"
+    default = "/var/lib/libvirt/images/noble-server-cloudimg-amd64.img"
 }
